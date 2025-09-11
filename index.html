@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Detección de Gestos Faciales</title>
+  <link rel="stylesheet" href="style.css" />
+  <link
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+    rel="stylesheet"
+  />
+</head>
+<body>
+
+  <!-- Navbar -->
+  <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="#">Face Gestures Web</a>
+    </div>
+  </nav>
+
+  <!-- Contenido principal -->
+  <div class="container my-4 text-center">
+    <h2>Detección de ojos, cejas y boca</h2>
+
+    <div class="ratio ratio-4x3 mx-auto my-3" style="max-width: 720px;">
+      <video id="videoInput" autoplay playsinline muted class="rounded border"></video>
+    </div>
+    <canvas id="canvasOutput" class="d-block mx-auto rounded shadow-sm" style="max-width: 720px;"></canvas>
+
+    <div class="row mt-4 g-3 justify-content-center">
+      <div class="col-auto">
+        <div class="card px-3 py-2">
+          <div class="small text-muted">Parpadeos</div>
+          <div class="fs-4" id="blinkCount">0</div>
+        </div>
+      </div>
+      <div class="col-auto">
+        <div class="card px-3 py-2">
+          <div class="small text-muted">Movimientos de cejas</div>
+          <div class="fs-4" id="eyebrowCount">0</div>
+        </div>
+      </div>
+      <div class="col-auto">
+        <div class="card px-3 py-2">
+          <div class="small text-muted">Aperturas de boca</div>
+          <div class="fs-4" id="mouthCount">0</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="text-muted small mt-3" id="status">Inicializando cámara...</p>
+  </div>
+
+  <!-- Footer -->
+  <footer class="bg-dark text-white text-center p-3">
+    <p id="footerInfo">Cargando datos del programador...</p>
+  </footer>
+
+  <!-- MediaPipe FaceMesh -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <!-- App JS -->
+  <script src="app.js"></script>
+</body>
+</html>
