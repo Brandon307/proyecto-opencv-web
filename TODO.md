@@ -1,7 +1,0 @@
-- [x] Download lbfmodel.yaml for facial landmarks detection
-- [x] Update style.css with Bootstrap 5 styles using purple, black, and green colors
-- [x] Modify app.js to use DNN for face detection instead of Haar cascades
-- [x] Modify app.js to load FacemarkLBF and detect facial landmarks
-- [x] Implement gesture detection using landmarks: Eye Aspect Ratio (EAR) for blinks, Mouth Aspect Ratio (MAR) for mouth open/close, and eyebrow raise detection
-- [x] Update the UI counters for gestures
-- [ ] Test the application functionality
