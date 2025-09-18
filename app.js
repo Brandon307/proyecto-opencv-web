@@ -4,18 +4,20 @@ let ctx = canvas.getContext('2d');
 let statusEl = document.getElementById('status');
 let blinkCountEl = document.getElementById('blinkCount');
 let eyebrowCountEl = document.getElementById('eyebrowCount');
-let mouthCountEl = document = document.getElementById('mouthCount');
+let mouthCountEl = document.getElementById('mouthCount');
 
-let faceCascade, eyeCascade, mouthCascade;
+let net, facemark;
 let streaming = false;
-let src, gray, faces, eyes, mouths, cap;
+let src, faces, cap, landmarks;
 
 let blinkCount = 0;
-let lastEyesDetected = 2;
 let lastBlink = false;
 
 let mouthCount = 0;
 let lastMouthDetected = false;
+
+let eyebrowCount = 0;
+let lastEyebrowRaised = false;
 
 let loadAttempt = 0;
 const MAX_LOAD_ATTEMPTS = 3;
@@ -35,48 +37,24 @@ function loadModelsAndStartApp() {
         }
     }, LOAD_TIMEOUT_MS);
 
-    faceCascade = new cv.CascadeClassifier();
-    eyeCascade = new cv.CascadeClassifier();
-    mouthCascade = new cv.CascadeClassifier();
-
-    const faceCascadeFile = 'haar/haarcascade_frontalface_default.xml';
-    const eyeCascadeFile = 'haar/haarcascade_eye.xml';
-    const mouthCascadeFile = 'haar/haarcascade_mcs_mouth.xml';
-
-    Promise.all([
-        fetch(faceCascadeFile).then(response => response.arrayBuffer()),
-        fetch(eyeCascadeFile).then(response => response.arrayBuffer()),
-        fetch(mouthCascadeFile).then(response => response.arrayBuffer())
-    ]).then(buffers => {
-        clearTimeout(loadTimeout);
-        console.log("🟢 Modelos cargados exitosamente.");
-
-        cv.FS_createDataFile('/', 'face.xml', new Uint8Array(buffers[0]), true, false, false);
-        cv.FS_createDataFile('/', 'eye.xml', new Uint8Array(buffers[1]), true, false, false);
-        cv.FS_createDataFile('/', 'mouth.xml', new Uint8Array(buffers[2]), true, false, false);
-
-        faceCascade.load('face.xml');
-        eyeCascade.load('eye.xml');
-        mouthCascade.load('mouth.xml');
-
-        src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
-        gray = new cv.Mat();
-        faces = new cv.RectVector();
-        eyes = new cv.RectVector();
-        mouths = new cv.RectVector();
-        
-        statusEl.innerText = "✅ Modelos cargados. Iniciando cámara...";
-        startCamera();
-    }).catch(error => {
-        clearTimeout(loadTimeout);
-        console.error("❌ Error al cargar los archivos XML:", error);
-        if (loadAttempt < MAX_LOAD_ATTEMPTS) {
-            console.warn("⚠️ Fallo en la carga. Reintentando...");
-            loadModelsAndStartApp();
-        } else {
-            statusEl.innerText = "❌ Fallo en la carga. Intenta recargar la página.";
-        }
+    // Load DNN face detector model using cv.Net()
+    net = new cv.Net();
+    fetch('models/deploy_face.prototxt').then(response => response.text()).then(proto => {
+        fetch('models/res10_300x300_ssd_iter_140000_fp16.caffemodel').then(response => response.arrayBuffer()).then(weights => {
+            net.readFromModelOptimizer(proto, new Uint8Array(weights));
+        });
     });
+
+    // Load Facemark LBF model
+    facemark = new cv.FaceMarkLBF();
+    facemark.loadModel('models/lbfmodel.yaml');
+
+    src = new cv.Mat(video.height, video.width, cv.CV_8UC4);
+    faces = new cv.RectVector();
+    landmarks = new cv.MatVector();
+
+    statusEl.innerText = "✅ Modelos cargados. Iniciando cámara...";
+    startCamera();
 }
 
 function startCamera() {
@@ -107,70 +85,89 @@ function processVideo() {
 
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+    // Detect faces using DNN
+    let blob = cv.blobFromImage(src, 1.0, new cv.Size(300, 300), new cv.Scalar(104, 177, 123, 0), false, false);
+    net.setInput(blob);
+    let detections = net.forward();
+    faces.clear();
+    for (let i = 0; i < detections.size[2]; i++) {
+        let confidence = detections.data32F[7 * i + 2];
+        if (confidence > 0.5) {
+            let x1 = detections.data32F[7 * i + 3] * src.cols;
+            let y1 = detections.data32F[7 * i + 4] * src.rows;
+            let x2 = detections.data32F[7 * i + 5] * src.cols;
+            let y2 = detections.data32F[7 * i + 6] * src.rows;
+            let rect = new cv.Rect(x1, y1, x2 - x1, y2 - y1);
+            faces.push_back(rect);
+        }
+    }
 
-    faceCascade.detectMultiScale(gray, faces, 1.5, 3, 0, new cv.Size(50, 50), new cv.Size(0, 0));
+    // Fit landmarks
+    facemark.fit(src, faces, landmarks);
 
-    // Dibujar los rectángulos de la cara
+    // Process each face
     for (let i = 0; i < faces.size(); ++i) {
         let face = faces.get(i);
         let point1 = new cv.Point(face.x, face.y);
         let point2 = new cv.Point(face.x + face.width, face.y + face.height);
-       // cv.rectangle(src, point1, point2, [255, 0, 0, 255], 2); // Rectángulo azul para la cara
+        cv.rectangle(src, point1, point2, [255, 0, 0, 255], 2); // Blue rectangle for face
 
-        let roiGray = gray.roi(face);
-        
-        // Detección de Ojos
-        eyeCascade.detectMultiScale(roiGray, eyes, 1.1, 3, 0, new cv.Size(0, 0), new cv.Size(0, 0));
-        
-        for (let j = 0; j < eyes.size(); ++j) {
-            let eye = eyes.get(j);
-            let eyePoint1 = new cv.Point(face.x + eye.x, face.y + eye.y);
-            let eyePoint2 = new cv.Point(face.x + eye.x + eye.width, face.y + eye.y + eye.height);
-            cv.rectangle(src, eyePoint1, eyePoint2, [0, 255, 0, 255], 2); // Rectángulo verde para los ojos
+        let landmark = landmarks.get(i);
+
+        // Draw landmarks
+        for (let j = 0; j < landmark.rows; j++) {
+            let x = landmark.data32F[j * 2];
+            let y = landmark.data32F[j * 2 + 1];
+            cv.circle(src, new cv.Point(x, y), 2, [0, 255, 0, 255], -1);
         }
 
-        if (eyes.size() < lastEyesDetected) {
+        // Calculate EAR for left eye (36-41)
+        let leftEAR = eyeAspectRatio(landmark, 36, 37, 38, 39, 40, 41);
+        let rightEAR = eyeAspectRatio(landmark, 42, 43, 44, 45, 46, 47);
+        let ear = (leftEAR + rightEAR) / 2.0;
+        if (ear < 0.25) {
             if (!lastBlink) {
                 blinkCount++;
                 blinkCountEl.innerText = blinkCount;
+                lastBlink = true;
             }
-            lastBlink = true;
         } else {
             lastBlink = false;
         }
-        lastEyesDetected = eyes.size();
 
-        // Detección de Boca
-        let mouthRect = new cv.Rect(face.x, face.y + face.height / 2, face.width, face.height / 2);
-        let roiMouth = gray.roi(mouthRect);
-
-        mouthCascade.detectMultiScale(roiMouth, mouths, 1.8, 2, 0, new cv.Size(0, 0), new cv.Size(0, 0));
-        
-        for (let k = 0; k < mouths.size(); ++k) {
-            let mouth = mouths.get(k);
-            let mouthPoint1 = new cv.Point(face.x + mouthRect.x + mouth.x, face.y + mouthRect.y + mouth.y);
-            let mouthPoint2 = new cv.Point(face.x + mouthRect.x + mouth.x + mouth.width, face.y + mouthRect.y + mouth.y + mouth.height);
-            cv.rectangle(src, mouthPoint1, mouthPoint2, [1, 5, 255, 255], 2); // Rectángulo rojo para la boca
-        }
-        
-        if (mouths.size() > 0) {
+        // MAR for mouth (48-67)
+        let mar = mouthAspectRatio(landmark);
+        if (mar > 0.5) {
             if (!lastMouthDetected) {
                 mouthCount++;
                 mouthCountEl.innerText = mouthCount;
+                lastMouthDetected = true;
             }
-            lastMouthDetected = true;
         } else {
             lastMouthDetected = false;
         }
 
-        eyebrowCountEl.innerText = "N/A"; // Detección de cejas no es viable con este método
-
-        roiGray.delete();
-        roiMouth.delete();
+        // Eyebrow raise
+        let leftEyebrowRaise = eyebrowRaise(landmark, 17, 18, 19, 20, 21, 36, 37, 38, 39, 40, 41);
+        let rightEyebrowRaise = eyebrowRaise(landmark, 22, 23, 24, 25, 26, 42, 43, 44, 45, 46, 47);
+        let eyebrowRaiseAvg = (leftEyebrowRaise + rightEyebrowRaise) / 2.0;
+        if (eyebrowRaiseAvg < 0.3) {
+            if (!lastEyebrowRaised) {
+                eyebrowCount++;
+                eyebrowCountEl.innerText = eyebrowCount;
+                lastEyebrowRaised = true;
+            }
+        } else {
+            lastEyebrowRaised = false;
+        }
     }
-    
-    // Convertir la matriz de OpenCV de vuelta al canvas
+
+    // Clean up
+    blob.delete();
+    detections.delete();
+    landmarks.clear();
+    faces.clear();
+
     cv.imshow('canvasOutput', src);
 
     requestAnimationFrame(processVideo);
@@ -187,4 +184,35 @@ window.onload = () => {
 function onOpenCvReady() {
     console.log("🟢 OpenCV está listo.");
     loadModelsAndStartApp();
+}
+
+function eyeAspectRatio(landmark, p1, p2, p3, p4, p5, p6) {
+    let a = distance(landmark, p2, p6);
+    let b = distance(landmark, p3, p5);
+    let c = distance(landmark, p1, p4);
+    return (a + b) / (2.0 * c);
+}
+
+function mouthAspectRatio(landmark) {
+    let a = distance(landmark, 51, 57);
+    let b = distance(landmark, 52, 56);
+    let c = distance(landmark, 53, 55);
+    let d = distance(landmark, 48, 54);
+    return (a + b + c) / (2.0 * d);
+}
+
+function eyebrowRaise(landmark, b1, b2, b3, b4, b5, e1, e2, e3, e4, e5, e6) {
+    let dists = [];
+    for (let i = 0; i < 5; i++) {
+        dists.push(distance(landmark, b1 + i, e1 + i));
+    }
+    return dists.reduce((a, b) => a + b, 0) / dists.length;
+}
+
+function distance(landmark, p1, p2) {
+    let x1 = landmark.data32F[p1 * 2];
+    let y1 = landmark.data32F[p1 * 2 + 1];
+    let x2 = landmark.data32F[p2 * 2];
+    let y2 = landmark.data32F[p2 * 2 + 1];
+    return Math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2);
 }
